@@ -1,0 +1,16 @@
+- append metadata
+- danceability
+- gender
+-
+- mood
+- aggregate avg, variance, over time,
+-
+
+
+- append rankings - look just at top 10%, see how compares...
+- append/generate low-level
+  - dbfs
+
+- coverage statistics
+
+stopped at: 1,806,625
