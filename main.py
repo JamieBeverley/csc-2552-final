@@ -7,14 +7,15 @@ import pandas as pd
 from scipy import stats
 import datetime
 
+
+
 startTime = datetime.datetime.now()
 
-tar = tarfile.open("high-level.tar.bz2",mode="r:bz2")
 
-top100 = open('top-100.json')
-top100 = json.load(top100)
-top100 = list(top100.values())
-print("unique top 100 songs: ",len(top100))
+# top100 = open('top-100.json')
+# top100 = json.load(top100)
+# top100 = list(top100.values())
+# print("unique top 100 songs: ",len(top100))
 
 i = 0
 lim = 40000
@@ -24,11 +25,8 @@ d= {}
 
 uniqueGenres = set()
 
-# genre, date, danceability
-nones = 0
+# data = [None]*lim
 
-# data = np.zeros((lim,3))
-data = [None]*lim
 
 
 def cleanGenres(s):
@@ -62,7 +60,6 @@ def cleanDate(s):
         # print("warning could not clean date: ", s)
     return r
 
-# slope:  0.0051008503915541655   p:  1.8362819149172405e-14
 def safe_first(l):
     if (type(l) != list):
         return l
@@ -75,19 +72,7 @@ def safe_first(l):
 def column(matrix, i):
     return [row[i] for row in matrix]
 
-
-print('reading...')
-# tar.list()
-# print(len(tar.list()))
-# thing = []
-# test = 0;
-# for member in tar:
-#     test+=1;
-#     if(test%100==0):
-#         print(test)
-# print(test)
-
-
+# For comparing title and artist names
 def compare(s1,s2):
     if (s1.lower()==s2.lower()):
         return True
@@ -96,16 +81,21 @@ def compare(s1,s2):
     s2 = s2.lower().replace(" ","")
 
     if(s1==s2):
-        # print("match without spaces")
         return True
     return False
 
-    # return (s1.lower()==s2.lower() or s1.lower().replace(" ","") == s2.lower().replace(" ",""))
+# generates csv
+def generateTop100Csv (outputURL='top100-high-level.csv',lim=None,startAt=0):
 
-def generateTop100MBIDJSON (outputURL='top100-high-level.csv',lim=None,startAt=0):
+    top100 = open('top-100.json')
+    top100 = json.load(top100)
+    top100 = list(top100.values())
+    print("unique top 100 songs: ",len(top100))
 
     hasPutHeader = False;
     count = 0;
+    tar = tarfile.open("high-level.tar.bz2",mode="r:bz2")
+
     for member in tar:
         count += 1
         if(count-1<startAt):
@@ -133,12 +123,13 @@ def generateTop100MBIDJSON (outputURL='top100-high-level.csv',lim=None,startAt=0
                                 headerStr = "mbid, title(no commas), artist(no commas),"
                                 for i in highlevel:
                                     for j in highlevel[i].get('all'):
-                                        headerStr = headerStr +i+":"+j+", "
+                                        headerStr = headerStr +i+":"+j+","
                                 headerStr += "\n"
                                 outfile.write(headerStr)
                                 hasPutHeader = True
 
-                            s = mbid+", \""+title.replace(",","")+"\", \""+artist.replace(",","")+"\", "
+
+                            s = mbid+", \""+title.replace(",","")+"\", \""+artist.replace(",","")+"\","
                             for i in highlevel:
                                 s=s+dictToCSV(highlevel[i].get('all'))
 
@@ -161,29 +152,156 @@ def dictToCSV (d):
     return s
 
 
-generateTop100MBIDJSON()
+def removeEndRowCommas(inputCsvPath, outputCsvPath):
+    with open(inputCsvPath, 'r') as inputFile:
+        with open(outputCsvPath, "a") as outputFile:
+            for i in inputFile:
+                outputFile.write(i[:-2]+"\n")
+            outputFile.close()
+        inputFile.close();
 
 
-        # # content = json.load(s)
-        # # test = datetime.datetime.now()
-        # # thing.append(datetime.datetime.now()-test)
-        #
-        # genre = content.get('metadata',d).get('tags',d).get('genre')
-        # date = content.get('metadata',d).get('tags',d).get('date')
-        #
-        # genre = cleanGenres(safe_first(genre))
-        # date = cleanDate(safe_first(date))
-        #
-        #
-        # data[i] = [genre, date]
-        #
-        # if (type(genre) == list):
-        #     for l in genre:
-        #         uniqueGenres.add(l)
-        # else:
-        #     uniqueGenres.add(genre);
-        # if (genre == None):
-        #     nones += 1
+def generateMetadataCsv(inputCsvPath="", inputJsonPath="top-100.json", outputCsvPath="",startAt=0):
+    csv = pd.read_csv(inputCsvPath, sep=",",header=0)
+
+    t = open('top-100.json')
+    t = json.load(t)
+    top100 = {}
+    for i in t:
+        top100[i.lower()] = t[i]
+    # top100 = list(top100.values())
+
+    outfile = open(outputCsvPath,"a", encoding="utf-8")
+
+    tar = tarfile.open("high-level.tar.bz2",mode="r:bz2")
+    tags_fields = ["date","genre","originaldate","releasecountry","musicbrainz album release country","tracknumber","label"]
+    audio_properties_fields = ["sample_rate","replay_gain","length","downmix","codec","bit_rate","equal_loudness","lossless"]
+
+    hasPutHeader = False;
+    mbids = csv.as_matrix()[:,0]
+    peakErrs = []
+    tryErrs = []
+    count = 0
+    for member in tar:
+        try:
+            count += 1
+            if(count-1<startAt):
+                continue;
+
+            f=tar.extractfile(member)
+            mbid = member.name[-43:-7]
+            index = np.argwhere(mbids==mbid).flatten()
+            if (index.shape[0] > 0):
+                index = index[0]
+                mbids = np.delete(mbids,index)
+                print(mbid, "  |  iteration: ",count,"  -  ", count*100/1800000, "% finished")
+                content = json.loads(tar.extractfile(member).read().decode('utf-8'))
+                metadata = content.get('metadata')
+                title = safe_first(content.get('metadata',{}).get('tags',{}).get('title'))
+                artist = safe_first(content.get('metadata',{}).get('tags',{}).get('artist'))
+                audio_properties = metadata.get('audio_properties')
+                tags = metadata.get('tags')
+
+                if(hasPutHeader==False):
+                    headerStr = "mbid, title(no commas), artist(no commas), peakPos,"
+                    for i in audio_properties_fields:
+                        headerStr += "audio_properties:"+i+","
+                    for i in tags_fields:
+                        headerStr += "tags:" + i + ","
+
+                    headerStr = headerStr[:-1]+"\n"
+                    outfile.write(headerStr)
+                    hasPutHeader = True
+
+                if(title==None):
+                    title =""
+                if(artist==None):
+                    artist=""
+
+
+                s = mbid+", \""+title.replace(",","")+"\", \""+artist.replace(",","")+"\","
+                peakPos = top100.get(title.lower() +" - "+artist.lower(),{}).get('peakPos',"")
+                if(peakPos==""):
+                    print("********************could not find peakPos for:  ",title," - ",artist)
+                    peakErrs.append(mbid)
+                s += str(peakPos)+","
+
+                for i in audio_properties_fields:
+                    s += str(audio_properties.get(i,""))+","
+                for i in tags_fields:
+                    s += str(tags.get(i,"")).replace(",","|")+","
+                    # print(str(tags[i]).replace(",","|"))
+                    # s+= str(tags[i]).replace(",","|") +","
+                s = s[:-1]+"\n"
+                # print(s)
+                outfile.write(s)
+                # try:
+        except KeyboardInterrupt:
+            print("KeyboardInterrupt")
+            print("on count: ",count)
+            outfile.close()
+            return;
+        except:
+            print("*********@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@error on: ",count);
+            tryErrs.append(count)
+
+            #     outfile.write(s);
+            #     print(s)
+            # except:
+            #     print("error with: ")
+            #     print(s)
+            #     outfile.close()
+            #     return
+    print("peak errors on ", len(errs)," songs")
+    print(errs)
+    print('try errors on ',len(tryErrs)," songs")
+    print(tryErrs)
+    outfile.close()
+
+def calculateBasicStats (csvPath, feature):
+    csv = pd.read_csv(csvPath, sep=",",header=0)
+    data = csv.loc[:,feature]
+    print("\nSummary stats: ",feature)
+    print("Total mean     : ",data.mean())
+    print("Total variance : ",data.var())
+    return
+
+features = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental"]
+
+# for i in features:
+#     calculateBasicStats("top100-high-level-commas-removed.csv",i)
+
+
+def getLowelevel (inputCsvPath,outputCsvPath):
+    csv = pd.read_csv(inputCsvPath, sep=",",header=0)
+    mbids = csv.as_matrix[:,0]
+
+
+def ugh():
+    csv1 = pd.read_csv("top100-high-level-commas-removed.csv", sep=",",header=0).as_matrix()[:,0]
+    csv2 = pd.read_csv("top100-high-level-metadata.csv", sep=",",header=0).as_matrix()[:,0]
+    print(csv2.shape)
+    print(csv1.shape)
+    i=0;
+    cond = True
+    while (cond):
+        if (csv1[i]!=csv2[i]):
+            print(i)
+            print(csv1[i],"  ",csv2[i])
+            cond=False
+        i +=1
+    print(csv1==csv2)
+    # print(np.argwhere(csv1!=csv2))
+
+
+ugh()
+
+# generateMetadataCsv("top100-high-level-commas-removed.csv",outputCsvPath="top100-high-level-metadata.csv")
+
+# removeEndRowCommas('top100-high-level.csv','top100-high-level-commas-removed.csv')
+
+
+
 
 
 
