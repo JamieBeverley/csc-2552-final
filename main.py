@@ -6,7 +6,7 @@ import pandas as pd
 # import matplotlib.markers as markers
 from scipy import stats
 import datetime
-
+import ast
 
 
 startTime = datetime.datetime.now()
@@ -48,17 +48,7 @@ def cleanGenres(s):
             r[i] = r[i].lstrip().rstrip().lower()
     return r
 
-def cleanDate(s):
-    if (s == None):
-        return None
-    s = s.replace(" ","")
-    r = None
-    try:
-        r = pd.to_datetime(s,utc=True).date();
-    except:
-        return None
-        # print("warning could not clean date: ", s)
-    return r
+
 
 def safe_first(l):
     if (type(l) != list):
@@ -258,18 +248,113 @@ def generateMetadataCsv(inputCsvPath="", inputJsonPath="top-100.json", outputCsv
     print(tryErrs)
     outfile.close()
 
-def calculateBasicStats (csvPath, feature):
+def calculateBasicStats (csvPath, feature, replaceEmpty=False):
     csv = pd.read_csv(csvPath, sep=",",header=0)
+    if replaceEmpty:
+        csv.replace("",np.nan,inplace=True)
+        csv.dropna(subset=[feature],inplace=True)
     data = csv.loc[:,feature]
     print("\nSummary stats: ",feature)
     print("Total mean     : ",data.mean())
     print("Total variance : ",data.var())
     return
 
-features = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental"]
+features = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental",' peakPos']
 
 # for i in features:
-#     calculateBasicStats("top100-high-level-commas-removed.csv",i)
+    # calculateBasicStats("top100-high-level-complete.csv",i,True)
+
+
+def cleanDate(s):
+    s = str(s)
+    if (s == None or s == ""):
+        return np.datetime64("NaT")
+    try:
+        s = ast.literal_eval(s)
+        if(type(s)==list):
+            s = s[0]
+    except:
+        r = np.datetime64("NaT")
+    try:
+        s = s.replace(" ","")
+        r = pd.to_datetime(s,utc=True).date();
+        # print('returned pd date: ',r)
+    except:
+        return np.datetime64("NaT")
+    return r
+
+
+# csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
+# csv.replace("",np.nan,inplace=True)
+# csv.dropna(subset=['tags:originaldate'],inplace=True);
+# originaldate = csv.loc[:,"tags:originaldate"]
+# print(originaldate.shape)
+# originaldate = originaldate.map(cleanDate)
+# originaldate.dropna(inplace=True)
+# print(originaldate.shape)
+# print(originaldate[:5])
+
+print("_________________________")
+# csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
+# originaldate = (csv.loc[:,"tags:originaldate"]).map(cleanDate).values
+# date = (csv.loc[:,'tags:date']).map(cleanDate).values
+
+csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
+data = (csv.loc[:,("tags:originaldate"," peakPos",'tags:date')])
+data['tags:originaldate'] = data['tags:originaldate'].apply(cleanDate)
+data['tags:date'] = data['tags:date'].apply(cleanDate)
+# originaldate[:,'tags:originaldate'] = originaldate[:,'tags:originaldate'].map(cleanDate)
+# originaldate = originaldate.as_matrix()
+
+
+def fk(x):
+    return (np.isnat(x.to_datetime64()))
+
+data['tags:originaldate'] = data['tags:date'].where(data['tags:originaldate'].map(fk),other=data['tags:originaldate'])
+data = data[data['tags:originaldate'].map(lambda a: not fk(a))]
+
+
+print(data[:70])
+print("@@@@@@@@@@@@")
+
+
+
+# print(originaldate['tags:originaldate'].map(fk)[:5] ==)
+
+# print(date[:5])
+# print(originaldate.shape)
+# originaldate = originaldate.where(,date)
+
+# print(originaldate[:5])
+
+# pd.where(originaldate['tags:originaldate'].isnat(),date)
+# date = date.as_matrix()
+# print(originaldate[:5,0])
+
+# print(np.isnat(originaldate[:,0]))
+
+# date = np.where(np.isnat(originaldate[:,0]), date, originaldate) # where original date is not defined, take 'date'
+# date = date[np.logical_not(np.isnat(date))]
+
+# print("with dates: ",date.shape)
+# print(date[:5])
+
+
+# csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
+# print(csv.shape)
+# print(type(csv))
+# csv.replace("",np.nan,inplace=True)
+# csv.dropna(subset=[' peakPos'],inplace=True)
+# data = csv.loc[:," peakPos"]
+# print(data[:100])
+# print(data.shape)
+# print(data.mean())
+# print(data.var())
+# print(csv.shape)
+# print("done")
+# >>> df.dropna(subset=['Tenant'], inplace=True)
+# defined = [i for i in data if not pd.isnull(i[1]) and i[1] >= pd.to_datetime('1900',utc=True).date() and i[2]!= None]
+
 
 
 def getLowelevel (inputCsvPath,outputCsvPath):
@@ -291,10 +376,7 @@ def ugh():
             cond=False
         i +=1
     print(csv1==csv2)
-    # print(np.argwhere(csv1!=csv2))
 
-
-ugh()
 
 # generateMetadataCsv("top100-high-level-commas-removed.csv",outputCsvPath="top100-high-level-metadata.csv")
 
