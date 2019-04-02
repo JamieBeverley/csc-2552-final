@@ -2,12 +2,19 @@ import numpy as np
 import tarfile
 import json
 import pandas as pd
-# import matplotlib.pyplot as mpl
+import matplotlib.pyplot as mpl
+from matplotlib import rcParams
 # import matplotlib.markers as markers
 from scipy import stats
+import scikit_posthocs as ph
 import datetime
 import ast
+import math
 
+import seaborn as sns
+
+rcParams['axes.titlepad'] = 10
+rcParams['figure.subplot.hspace'] = 0.95
 
 startTime = datetime.datetime.now()
 
@@ -259,7 +266,7 @@ def calculateBasicStats (csvPath, feature, replaceEmpty=False):
     print("Total variance : ",data.var())
     return
 
-features = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental",' peakPos']
+features = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_aggressive:aggressive"," mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental"," mood_electronic:electronic"," mood_acoustic:acoustic",' peakPos', ]
 
 # for i in features:
     # calculateBasicStats("top100-high-level-complete.csv",i,True)
@@ -283,39 +290,145 @@ def cleanDate(s):
         return np.datetime64("NaT")
     return r
 
-
-# csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
-# csv.replace("",np.nan,inplace=True)
-# csv.dropna(subset=['tags:originaldate'],inplace=True);
-# originaldate = csv.loc[:,"tags:originaldate"]
-# print(originaldate.shape)
-# originaldate = originaldate.map(cleanDate)
-# originaldate.dropna(inplace=True)
-# print(originaldate.shape)
-# print(originaldate[:5])
-
-print("_________________________")
-# csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
-# originaldate = (csv.loc[:,"tags:originaldate"]).map(cleanDate).values
-# date = (csv.loc[:,'tags:date']).map(cleanDate).values
-
-csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
-data = (csv.loc[:,("tags:originaldate"," peakPos",'tags:date')])
-data['tags:originaldate'] = data['tags:originaldate'].apply(cleanDate)
-data['tags:date'] = data['tags:date'].apply(cleanDate)
-# originaldate[:,'tags:originaldate'] = originaldate[:,'tags:originaldate'].map(cleanDate)
-# originaldate = originaldate.as_matrix()
-
-
-def fk(x):
+def isNaT(x):
     return (np.isnat(x.to_datetime64()))
 
-data['tags:originaldate'] = data['tags:date'].where(data['tags:originaldate'].map(fk),other=data['tags:originaldate'])
-data = data[data['tags:originaldate'].map(lambda a: not fk(a))]
+def getTimeSeries(features,csvUrl='top100-high-level-complete.csv', fillMissingOriginalDate=True):
+    csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
+    features = features+['tags:originaldate','tags:date']
+    data = csv.loc[:,features]
+
+    data['tags:originaldate'] = data['tags:originaldate'].apply(cleanDate)
+    data['tags:date'] = data['tags:date'].apply(cleanDate)
+
+    if (fillMissingOriginalDate):
+        data['tags:originaldate'] = data['tags:date'].where(data['tags:originaldate'].map(isNaT),other=data['tags:originaldate'])
+
+    data = data[data['tags:originaldate'].map(lambda a: not isNaT(a))]
+
+    return data.loc[:,features]
 
 
-print(data[:70])
-print("@@@@@@@@@@@@")
+
+def dateLinRegress(features, dateRange=('1900','2020'),plot=False):
+    data = getTimeSeries(features)
+    dateRange = (pd.to_datetime(str(dateRange[0])), pd.to_datetime(str(dateRange[1])))
+    # x = data['tags:originaldate'].map(lambda a: a.year).as_matrix()
+    data = data[data['tags:originaldate']<=dateRange[1]]
+    data = data[dateRange[0] <=data ['tags:originaldate']]
+    f = None
+    if plot:
+        f, axes = mpl.subplots(nrows = math.ceil(len(features)/2), ncols = 2,figsize=(10,30))
+    for i in range(len(features)):
+        print(features[i]," :")
+        t = data[pd.notnull(data[features[i]])]
+        x = t['tags:originaldate'].map(lambda a: a.year).values
+        y = t[features[i]].values
+        print(x[:5])
+        print(y[:5])
+        slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
+        if plot:
+            axes[i//2][i%2].scatter(x,y,s=1)
+            axes[i//2][i%2].set_title(features[i])
+        print("slope: ",slope, "  p: ",p_value)
+        print('_____________\n')
+    if plot:
+        mpl.show()
+
+
+def timeRangeAnova(features,timeWindowSize=10, plot=False,dateRange=(1950,2010)):
+    data = getTimeSeries(features)
+    # [ timerange( [ features(mean,var) ] ) ]
+    data['tags:originaldate'] = data['tags:originaldate'].map(lambda a: math.floor(a.year/timeWindowSize)*timeWindowSize)
+    data = data[data['tags:originaldate']<=dateRange[1]]
+    data = data[dateRange[0] <=data ['tags:originaldate']]
+
+    print("\n")
+    # if plot:
+
+        # f, axes = mpl.subplots(nrows = math.ceil(len(features)/2), ncols = 2,figsize=(10,30))
+
+    count = 0
+    for i in features:
+        # mod = sm.OLS(i+" ~ tags:originaldate", data=data)
+        print("| ",i,": ")
+        clean_data = data[pd.notnull(data[i])]
+        unique_years = pd.unique(clean_data['tags:originaldate'])
+        l = pd.DataFrame()
+        l2 = []
+        for j in unique_years:
+            t= clean_data[clean_data['tags:originaldate']==j]
+            t= t[i]
+            l[j] = t
+            print(j)
+            l2.append(t)
+        print(l.shape)
+        kruskal = stats.kruskal(*l2)
+        post_hoc = ph.posthoc_dunn(clean_data,group_col="tags:originaldate",val_col=i)
+        print("| ",kruskal)
+        print("| ",post_hoc<0.001)
+        print("|___________________\n")
+        if plot:
+            unique_years.sort()
+            f, axes = mpl.subplots(nrows=1, ncols = 2, constrained_layout=True)
+            for j in unique_years:
+                # sns.boxplot(clean_data[clean_data['tags:originaldate']==j].loc[:,i],ax=axes[1])
+                clean_data.boxplot(i,by="tags:originaldate", ax=axes[1])
+            axes[1].set_title("")
+            axes[1].set_xlabel("year")
+            for j in unique_years:
+                sns.distplot(clean_data[clean_data['tags:originaldate']==j].loc[:,i],label=str(j),bins=40,norm_hist=True,ax=axes[0])
+            axes[0].legend(loc="upper right")
+            mpl.suptitle(i)
+            mpl.show()
+            # graph_data['date']
+            # clean_data.loc[:,("tags:originaldate",i)].plot.hist(alpha=0.5,)
+            # clean_data.boxplot(i,by="tags:originaldate")
+            # axes[count//2][count%2] = clean_data.boxplot(i,by="tags:originaldate")
+            # axes[count//2][count%2].set_title(i)
+        count+=1
+    if plot:
+        mpl.show()
+    # vals = []
+    # for i in timeRanges:
+    #     v = []
+    #     # apply date range
+    #     t = data[data['tags:originaldate']<i[1]]
+    #     t = t[i[0]<t['tags:originaldate']]
+    #     for j in features:
+    #
+    #         t2 = t[j].values
+    #         mean = t2.mean()
+    #         var = t2.var()
+    #         v.append((mean,var))
+    #     vals.append(v)
+    #
+    # for i in range(len(timeRanges)):
+    #     for j in range(i):
+    #         return
+
+
+
+
+# dateLinRegress(features,plot=True)
+timeRangeAnova(features, timeWindowSize=10,plot=True,dateRange=(1950,2020))
+
+
+# feature = " mood_happy:happy"
+# data = getTimeSeries(feature)
+
+# x = data['tags:originaldate'].map(lambda a: a.year).as_matrix()
+# y = data[feature].as_matrix()
+
+
+
+# slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
+# slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
+
+# print("slope: ",slope, "  p: ",p_value)
+# mpl.scatter(x,y,s=1)
+# mpl.show()
+
 
 
 

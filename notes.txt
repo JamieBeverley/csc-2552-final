@@ -1,3 +1,13 @@
+- entire avg/variance
+- time-series linear reg
+
+
+- binned decades anova
+- genre-specific
+
+
+
+
 - append metadata
 - danceability
 - gender
