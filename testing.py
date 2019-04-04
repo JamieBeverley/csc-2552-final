@@ -135,7 +135,6 @@ x = year_vectorized(x)
 
 slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
 print("slope: ",slope, "  p: ",p_value)
-
 print((datetime.datetime.now()-starTime).seconds)
 
 # mpl.scatter(x,y,s=1)

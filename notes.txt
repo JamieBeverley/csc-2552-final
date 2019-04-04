@@ -24,3 +24,51 @@
 - coverage statistics
 
 stopped at: 1,806,625
+
+
+
+
+
+
+
+
+lowlevel:
+
+
+"num" - 0.0
+"d1"  - {dmean:0...}
+"d2"  - {dmean[0]...}  {cov[], ...}
+"list" - [0.0]
+"str" - "E"
+
+
+jsonTypeMap = {
+  "lowlevel":
+  {"average_loudness":"num","barkbands":"d2","dissonance":"d1", "dynamic_complexity":"num", "melbands": "d2","mfcc":"d2","pitch_salience":"d1","spectral_centroid":"d1","spectral_energy":"d1","spectral_energyband_high":"d1","spectral_energyband_low":"d1","spectral_energyband_middle_high":"d1","spectral_energyband_middle_low":"d1","spectral_entropy":"d1","spectral_flux":"d1","spectral_kurtosis":"d1","spectral_rms":"d1","spectral_rolloff":"d1","spectral_skewness":"d1","spectral_spread":"d1","spectral_strongpeak":"d1"},
+  "metadata":{"tags":'d2', "audio_properties":"d1"},
+  "rhythm":{"beats_count":"num", "bpm":"num"},
+  "tonal":
+  {"chords_changes_rate":"num", "chords_histogram":"list", "chords_key":"str", "chords_scale":"str", "key_key":"str", "key_scale":"str", "key_strength":"num"}
+}
+
+
+
+
+
+
+
+
+
+lowlevel
+{"average_loudness":"num","barkbands":"d2","dissonance":"d1", "dynamic_complexity":"num", "melbands": "d2","mfcc":"d2","pitch_salience":"d1","spectral_centroid":"d1","spectral_energy":"d1","spectral_energyband_high":"d1","spectral_energyband_low":"d1","spectral_energyband_middle_high":"d1","spectral_energyband_middle_low":"d1","spectral_entropy":"d1","spectral_flux":"d1","spectral_kurtosis":"d1","spectral_rms":"d1","spectral_rolloff":"d1","spectral_skewness":"d1","spectral_spread":"d1","spectral_strongpeak":"d1"}
+
+
+metadata:
+{"tags":'d2', "audio_properties":"d1"}
+
+
+rhythm:
+{"beats_count":"num", "bpm":"num"}
+
+"tonal":
+{"chords_changes_rate":"num", "chords_histogram":"list", "chords_key":"str", "chords_scale":"str", "key_key":"str", "key_scale":"str", "key_strength":"num"}

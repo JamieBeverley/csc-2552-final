@@ -10,8 +10,15 @@ import scikit_posthocs as ph
 import datetime
 import ast
 import math
-
+import requests
 import seaborn as sns
+
+
+# from urlparse import urlparse
+from threading import Thread
+import httplib2, sys, urllib
+import queue
+
 
 rcParams['axes.titlepad'] = 10
 rcParams['figure.subplot.hspace'] = 0.95
@@ -35,6 +42,14 @@ uniqueGenres = set()
 # data = [None]*lim
 
 
+jsonTypeMap = {
+  "lowlevel":
+  {"average_loudness":"num","barkbands":"d2","dissonance":"d1", "dynamic_complexity":"num", "melbands": "d2","mfcc":"d2","pitch_salience":"d1","spectral_centroid":"d1","spectral_energy":"d1","spectral_energyband_high":"d1","spectral_energyband_low":"d1","spectral_energyband_middle_high":"d1","spectral_energyband_middle_low":"d1","spectral_entropy":"d1","spectral_flux":"d1","spectral_kurtosis":"d1","spectral_rms":"d1","spectral_rolloff":"d1","spectral_skewness":"d1","spectral_spread":"d1","spectral_strongpeak":"d1"},
+  "metadata":{"tags":'d2', "audio_properties":"d1"},
+  "rhythm":{"beats_count":"num", "bpm":"num"},
+  "tonal":
+  {"chords_changes_rate":"num", "chords_histogram":"list", "chords_key":"str", "chords_scale":"str", "key_key":"str", "key_scale":"str", "key_strength":"num"}
+}
 
 def cleanGenres(s):
     if (s is None):
@@ -242,13 +257,6 @@ def generateMetadataCsv(inputCsvPath="", inputJsonPath="top-100.json", outputCsv
             print("*********@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@error on: ",count);
             tryErrs.append(count)
 
-            #     outfile.write(s);
-            #     print(s)
-            # except:
-            #     print("error with: ")
-            #     print(s)
-            #     outfile.close()
-            #     return
     print("peak errors on ", len(errs)," songs")
     print(errs)
     print('try errors on ',len(tryErrs)," songs")
@@ -266,10 +274,8 @@ def calculateBasicStats (csvPath, feature, replaceEmpty=False):
     print("Total variance : ",data.var())
     return
 
-features = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_aggressive:aggressive"," mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental"," mood_electronic:electronic"," mood_acoustic:acoustic",' peakPos', ]
+features = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_aggressive:aggressive"," mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental"," mood_electronic:electronic"," mood_acoustic:acoustic",' peakPos',"audio_properties:length" ]
 
-# for i in features:
-    # calculateBasicStats("top100-high-level-complete.csv",i,True)
 
 
 def cleanDate(s):
@@ -336,7 +342,7 @@ def dateLinRegress(features, dateRange=('1900','2020'),plot=False):
         mpl.show()
 
 
-def timeRangeAnova(features,timeWindowSize=10, plot=False,dateRange=(1950,2010)):
+def timeRangeKruskal(features,timeWindowSize=10, plot=False,dateRange=(1950,2010)):
     data = getTimeSeries(features)
     # [ timerange( [ features(mean,var) ] ) ]
     data['tags:originaldate'] = data['tags:originaldate'].map(lambda a: math.floor(a.year/timeWindowSize)*timeWindowSize)
@@ -344,74 +350,245 @@ def timeRangeAnova(features,timeWindowSize=10, plot=False,dateRange=(1950,2010))
     data = data[dateRange[0] <=data ['tags:originaldate']]
 
     print("\n")
-    # if plot:
-
-        # f, axes = mpl.subplots(nrows = math.ceil(len(features)/2), ncols = 2,figsize=(10,30))
-
     count = 0
     for i in features:
         # mod = sm.OLS(i+" ~ tags:originaldate", data=data)
         print("| ",i,": ")
         clean_data = data[pd.notnull(data[i])]
         unique_years = pd.unique(clean_data['tags:originaldate'])
+        unique_years.sort()
+
         l = pd.DataFrame()
         l2 = []
         for j in unique_years:
             t= clean_data[clean_data['tags:originaldate']==j]
             t= t[i]
             l[j] = t
-            print(j)
             l2.append(t)
         print(l.shape)
         kruskal = stats.kruskal(*l2)
         post_hoc = ph.posthoc_dunn(clean_data,group_col="tags:originaldate",val_col=i)
+        dunn_significant = set()
+        for y1 in range(post_hoc.shape[0]):
+            for y2 in range(y1):
+                if post_hoc.iloc[y1,y2] < 0.05 and y1 != y2:
+                    dunn_significant.add((post_hoc.index.values[y1],post_hoc.columns.values[y2]))
+
         print("| ",kruskal)
-        print("| ",post_hoc<0.001)
+        print("|  significant pairs: ",dunn_significant)
+        print("| ",post_hoc<0.05)
         print("|___________________\n")
         if plot:
-            unique_years.sort()
             f, axes = mpl.subplots(nrows=1, ncols = 2, constrained_layout=True)
             for j in unique_years:
-                # sns.boxplot(clean_data[clean_data['tags:originaldate']==j].loc[:,i],ax=axes[1])
                 clean_data.boxplot(i,by="tags:originaldate", ax=axes[1])
             axes[1].set_title("")
-            axes[1].set_xlabel("year")
+            axes[1].set_xlabel("")
             for j in unique_years:
                 sns.distplot(clean_data[clean_data['tags:originaldate']==j].loc[:,i],label=str(j),bins=40,norm_hist=True,ax=axes[0])
             axes[0].legend(loc="upper right")
+            axes[0].set_xlabel("")
             mpl.suptitle(i)
+            mpl.xlabel("Significant (Dunn posthoc): "+str(dunn_significant), fontsize=8)
             mpl.show()
-            # graph_data['date']
-            # clean_data.loc[:,("tags:originaldate",i)].plot.hist(alpha=0.5,)
-            # clean_data.boxplot(i,by="tags:originaldate")
-            # axes[count//2][count%2] = clean_data.boxplot(i,by="tags:originaldate")
-            # axes[count//2][count%2].set_title(i)
         count+=1
-    if plot:
-        mpl.show()
-    # vals = []
-    # for i in timeRanges:
-    #     v = []
-    #     # apply date range
-    #     t = data[data['tags:originaldate']<i[1]]
-    #     t = t[i[0]<t['tags:originaldate']]
-    #     for j in features:
+
+
+# jsonTypeMap = {
+#   "lowlevel":
+#   {"average_loudness":"num","barkbands":"d2","dissonance":"d1", "dynamic_complexity":"num", "melbands": "d2","mfcc":"d2","pitch_salience":"d1","spectral_centroid":"d1","spectral_energy":"d1","spectral_energyband_high":"d1","spectral_energyband_low":"d1","spectral_energyband_middle_high":"d1","spectral_energyband_middle_low":"d1","spectral_entropy":"d1","spectral_flux":"d1","spectral_kurtosis":"d1","spectral_rms":"d1","spectral_rolloff":"d1","spectral_skewness":"d1","spectral_spread":"d1","spectral_strongpeak":"d1"},
+#
+#
+#   "rhythm":{"beats_count":"num", "bpm":"num"},
+#
+#   "tonal": {"chords_changes_rate":"num", "chords_histogram":"list", "chords_key":"str", "chords_scale":"str", "key_key":"str", "key_scale":"str", "key_strength":"num"},
+#   # "metadata":{"tags":'d3', "audio_properties":"d1"},
+#   # "metadata":{"tags":'d3'},
+# }
+
+
+jsonTypeMap = {
+  "lowlevel":
+  {"average_loudness":"num","dissonance":"d1", "dynamic_complexity":"num","pitch_salience":"d1","spectral_centroid":"d1","spectral_energy":"d1","spectral_energyband_high":"d1","spectral_energyband_low":"d1","spectral_energyband_middle_high":"d1","spectral_energyband_middle_low":"d1","spectral_entropy":"d1","spectral_flux":"d1","spectral_kurtosis":"d1","spectral_rms":"d1","spectral_rolloff":"d1","spectral_skewness":"d1","spectral_spread":"d1","spectral_strongpeak":"d1"},
+  "rhythm":{"beats_count":"num", "bpm":"num"},
+
+  "tonal": {"chords_changes_rate":"num", "chords_histogram":"list", "chords_key":"str", "chords_scale":"str", "key_key":"str", "key_scale":"str", "key_strength":"num"},
+  # "metadata":{"tags":'d3', "audio_properties":"d1"},
+  # "metadata":{"tags":'d3'},
+}
+
+# "num" - 0.0
+# "d1"  - {dmean:0...}
+# "d2"  - {dmean[0]...}  {cov[], ...}
+# "list" - [0.0]
+# "str" - "E"
+
+
+
+def parseByFormat(jsonVal, format, t):
+    s = ""
+    h = ""
+    if format == "num":
+        s = str(jsonVal)+","
+        h = t+","
+    elif format == "d1":
+        for k in jsonVal:
+            s = s+str(jsonVal[k])+","
+            h = h + t+":" + k + ","
+    elif format == "d2":
+        for k in jsonVal:
+            for i in range(len(jsonVal[k])):
+                s = s + str(jsonVal[k][i])+","
+                h = h+t+":"+ k+":"+str(i) +","
+    elif format == "d3":
+        for k in jsonVal:
+            if (k!="file_name"):
+                for i in range(len(jsonVal[k])):
+                    s = s + str(jsonVal[k][i]).replace(","," ")+","
+                    h = h+t+":"+ k+":"+str(i) +","
+    elif format == "list":
+        for i in range(len(jsonVal)):
+            s = s+str(jsonVal[i]) +","
+            h = h + t + ":" + str(i) + ","
+    elif format == "str":
+        s = str(jsonVal)+","
+        h = h + t+","
+    else:
+        print("***********warning parsing by unknown type: ",format)
+        s = None
+    return (s,h)
+
+
+def appendJSONToLowlevelCSV(csvURL, jsonVal):
+    # print(jsonVal.keys())
+    # wroteHeader = False
+    with open(csvURL,"a", encoding="utf-8") as outfile:
+        header = ["mbid",""]
+        for song in jsonVal:
+            s = song + ","
+            # h = ""
+            for type in jsonTypeMap: # lowlevel, metadata, etc...
+                for feature in jsonTypeMap[type]: # spectra_centroid, avg.loudness,etc...
+                    temp  = parseByFormat(jsonVal[song]['0'][type][feature],jsonTypeMap[type][feature],type+":"+feature)
+                    s = s + temp[0]
+                    # h = h + temp[1]
+            tags = jsonVal[song]['0'].get('metadata',{}).get('tags')
+
+            for metadata_property in ["date","genre","originaldate",'title','tracknumber']:
+                val = tags.get(metadata_property,[""])
+                s = s + str(val[0]).replace(",","")+","
+                # h = h + "metadata:tags:"+metadata_property+","
+            # h=h +"\n"
+            # if wroteHeader == False:
+                # print("okay...")
+                # print(h)
+                # wroteHeader = True
+            s = s +"\n"
+            outfile.write(s)
+    return None
+
+# def get_flat_json(json_data, header_string, header, row):
+#     """Parse json files with nested key-vales into flat lists using nested column labeling"""
+#     for root_key, root_value in json_data.items():
+#         if isinstance(root_value, dict):
+#             get_flat_json(root_value, header_string + '_' + str(root_key), header, row)
+#         elif isinstance(root_value, list):
+#             for value_index in range(len(root_value)):
+#                 for nested_key, nested_value in root_value[value_index].items():
+#                     header[0].append((header_string +
+#                                       '_' + str(root_key) +
+#                                       '_' + str(nested_key) +
+#                                       '_' + str(value_index)).strip('_'))
+#                     if nested_value is None:
+#                         nested_value = ''
+#                     row[0].append(str(nested_value))
+#         else:
+#             if root_value is None:
+#                 root_value = ''
+#             header[0].append((header_string + '_' + str(root_key)).strip('_'))
+#             row[0].append(root_value)
+#     return header, row
+
+
+
+def pull():
+    print((datetime.datetime.now()-startTime).seconds)
+
+    csv = pd.read_csv('top100-high-level-complete.csv')
+    mbids = list(csv['mbid'])
+    i = 0
+    atATime = 5
+    while (i < len(mbids)):
+        # try:
+        for j in range(atATime):
+            r = requests.get('https://acousticbrainz.org/api/v1/low-level',params={"recording_ids":mbids[i+j]})
+            val = json.loads(r.text)
+            print(val.keys())
+            print("\n")
+        # appendJSONToLowlevelCSV(csvURL="top100-low-level-complete.csv",jsonVal=vals)
+        print('count: ',i,"  -  ",i/len(mbids),"% pulled")
+        i+=atATime
+        if(i>5):
+            return
+        # except KeyboardInterrupt:
+            # return
+        # except:
+            # print("Error on iter: ",i)
+    # r = requests.get('https://acousticbrainz.org/api/v1/low-level',params={"recording_ids":mbids[:35]})
+    # print("size: ",len(r.text.encode('utf-8')))
+    # print(r.text)
+    # j = json.loads(r.text)
     #
-    #         t2 = t[j].values
-    #         mean = t2.mean()
-    #         var = t2.var()
-    #         v.append((mean,var))
-    #     vals.append(v)
-    #
-    # for i in range(len(timeRanges)):
-    #     for j in range(i):
-    #         return
+    # print(len([]))
 
 
-
-
+# *********** Data analysis
 # dateLinRegress(features,plot=True)
-timeRangeAnova(features, timeWindowSize=10,plot=True,dateRange=(1950,2020))
+# for i in features:
+    # calculateBasicStats("top100-high-level-complete.csv",i,True)
+# timeRangeKruskal(features, timeWindowSize=10,plot=True,dateRange=(1950,2020))
+
+# pull()
+
+# r = requests.get('https://acousticbrainz.org/api/v1/low-level',params={"recording_ids":['00057ae3-8bdc-4be3-9820-9006a10d763e', '00062658-acfc-4bdf-806f-aa6ec85e8ddd', '0006bab8-2a26-4f8d-8289-56d66ae01c68', '0008a33b-631f-4c66-a50e-ab33f27a2961']})
+
+
+
+
+
+
+
+
+# h = httplib2.Http();
+
+concurrent = 50
+csv = pd.read_csv('top100-high-level-complete.csv')
+mbids = list(csv['mbid'])
+def doWork():
+    while True:
+        mbid = q.get()
+        r = requests.get('https://acousticbrainz.org/api/v1/low-level',params={"recording_ids":[mbid]})
+        jsonVal = r.json()
+        # print(jsonVal.keys())
+        appendJSONToLowlevelCSV("top100-low-level-complete.csv", jsonVal)
+        q.task_done()
+
+
+cc = 0
+q = queue.Queue(concurrent * 2)
+for i in range(concurrent):
+    t = Thread(target=doWork)
+    t.daemon = True
+    t.start()
+try:
+    for mbid in mbids:
+        q.put(mbid)
+        cc+=1
+        print("iter: ",cc,"  -  ",cc/15000,"% done")
+    q.join()
+except KeyboardInterrupt:
+    sys.exit(1)
+
 
 
 # feature = " mood_happy:happy"
