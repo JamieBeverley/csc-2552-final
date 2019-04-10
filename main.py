@@ -12,7 +12,7 @@ import ast
 import math
 import requests
 import seaborn as sns
-
+from decimal import Decimal
 
 # from urlparse import urlparse
 from threading import Thread
@@ -274,7 +274,16 @@ def calculateBasicStats (csvPath, feature, replaceEmpty=False):
     print("Total variance : ",data.var())
     return
 
-features = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_aggressive:aggressive"," mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental"," mood_electronic:electronic"," mood_acoustic:acoustic",' peakPos',"audio_properties:length" ]
+def plotBasicStats (csvPath, features, replaceEmpty=False):
+    csv = pd.read_csv(csvPath, sep=",",header=0)
+    # if replaceEmpty:
+        # csv.replace("",np.nan,inplace=True)
+        # csv.dropna(subset=[feature],inplace=True)
+    data = csv.loc[:,features]
+    data.boxplot()
+    mpl.show()
+    return
+
 
 
 
@@ -291,6 +300,8 @@ def cleanDate(s):
     try:
         s = s.replace(" ","")
         r = pd.to_datetime(s,utc=True).date();
+        if r.year >2020:
+            r = r - pd.OffsetDate(years=100)
         # print('returned pd date: ',r)
     except:
         return np.datetime64("NaT")
@@ -300,7 +311,7 @@ def isNaT(x):
     return (np.isnat(x.to_datetime64()))
 
 def getTimeSeries(features,csvUrl='top100-high-level-complete.csv', fillMissingOriginalDate=True):
-    csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
+    csv = pd.read_csv(csvUrl, sep=",",header=0)
     features = features+['tags:originaldate','tags:date']
     data = csv.loc[:,features]
 
@@ -311,13 +322,12 @@ def getTimeSeries(features,csvUrl='top100-high-level-complete.csv', fillMissingO
         data['tags:originaldate'] = data['tags:date'].where(data['tags:originaldate'].map(isNaT),other=data['tags:originaldate'])
 
     data = data[data['tags:originaldate'].map(lambda a: not isNaT(a))]
-
     return data.loc[:,features]
 
 
 
-def dateLinRegress(features, dateRange=('1900','2020'),plot=False):
-    data = getTimeSeries(features)
+def dateLinRegress(features, csv,dateRange=('1900','2020'),plot=False):
+    data = getTimeSeries(features,csv)
     dateRange = (pd.to_datetime(str(dateRange[0])), pd.to_datetime(str(dateRange[1])))
     # x = data['tags:originaldate'].map(lambda a: a.year).as_matrix()
     data = data[data['tags:originaldate']<=dateRange[1]]
@@ -330,11 +340,9 @@ def dateLinRegress(features, dateRange=('1900','2020'),plot=False):
         t = data[pd.notnull(data[features[i]])]
         x = t['tags:originaldate'].map(lambda a: a.year).values
         y = t[features[i]].values
-        print(x[:5])
-        print(y[:5])
         slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
         if plot:
-            axes[i//2][i%2].scatter(x,y,s=1)
+            axes[i//2][i%2].scatter(x,y,s=0.01)
             axes[i//2][i%2].set_title(features[i])
         print("slope: ",slope, "  p: ",p_value)
         print('_____________\n')
@@ -342,13 +350,15 @@ def dateLinRegress(features, dateRange=('1900','2020'),plot=False):
         mpl.show()
 
 
-def timeRangeKruskal(features,timeWindowSize=10, plot=False,dateRange=(1950,2010)):
-    data = getTimeSeries(features)
+
+
+def timeRangeKruskal(features,csv="top100-high-level-complete.csv",timeWindowSize=10, plot=False,dateRange=(1950,2010)):
+    data = getTimeSeries(features,csv)
     # [ timerange( [ features(mean,var) ] ) ]
+    alpha = 0.001
     data['tags:originaldate'] = data['tags:originaldate'].map(lambda a: math.floor(a.year/timeWindowSize)*timeWindowSize)
     data = data[data['tags:originaldate']<=dateRange[1]]
     data = data[dateRange[0] <=data ['tags:originaldate']]
-
     print("\n")
     count = 0
     for i in features:
@@ -365,46 +375,265 @@ def timeRangeKruskal(features,timeWindowSize=10, plot=False,dateRange=(1950,2010
             t= t[i]
             l[j] = t
             l2.append(t)
-        print(l.shape)
+        # print(l2[:5])
         kruskal = stats.kruskal(*l2)
         post_hoc = ph.posthoc_dunn(clean_data,group_col="tags:originaldate",val_col=i)
         dunn_significant = set()
         for y1 in range(post_hoc.shape[0]):
             for y2 in range(y1):
-                if post_hoc.iloc[y1,y2] < 0.05 and y1 != y2:
+                if post_hoc.iloc[y1,y2] < alpha and y1 != y2:
                     dunn_significant.add((post_hoc.index.values[y1],post_hoc.columns.values[y2]))
 
         print("| ",kruskal)
         print("|  significant pairs: ",dunn_significant)
-        print("| ",post_hoc<0.05)
+        print("| ",post_hoc)
+        print("| ",(post_hoc<alpha).values.flatten().sum())
         print("|___________________\n")
         if plot:
-            f, axes = mpl.subplots(nrows=1, ncols = 2, constrained_layout=True)
-            for j in unique_years:
-                clean_data.boxplot(i,by="tags:originaldate", ax=axes[1])
-            axes[1].set_title("")
-            axes[1].set_xlabel("")
-            for j in unique_years:
-                sns.distplot(clean_data[clean_data['tags:originaldate']==j].loc[:,i],label=str(j),bins=40,norm_hist=True,ax=axes[0])
-            axes[0].legend(loc="upper right")
-            axes[0].set_xlabel("")
-            mpl.suptitle(i)
-            mpl.xlabel("Significant (Dunn posthoc): "+str(dunn_significant), fontsize=8)
-            mpl.show()
+            # f, axes = mpl.subplots(nrows=1, ncols = 2, constrained_layout=True)
+            # for j in unique_years:
+                # clean_data.boxplot(i,by="tags:originaldate", ax=axes[1])
+            a=clean_data.boxplot(i,by="tags:originaldate")
+            a.set_title(i,fontsize=20)
+
+
+            # axes[1].set_title("")
+            # axes[1].set_xlabel("")
+            # for j in unique_years:
+                # sns.distplot(clean_data[clean_data['tags:originaldate']==j].loc[:,i],label=str(j),bins=40,norm_hist=True,ax=axes[0])
+            # axes[0].legend(loc="upper right")
+            # axes[0].set_xlabel("")
+            # mpl.suptitle(i)
+            mpl.gcf().subplots_adjust(bottom=0.25)
+
+            dunnStr = "P<" +str(alpha)+ " (Dunn post-hoc): "
+            c = len(dunnStr);
+            for i in str(dunn_significant):
+                c +=1
+                dunnStr+=i
+                if (c%55==0):
+                    dunnStr += "\n"
+            mpl.xlabel(dunnStr, fontsize=14)
         count+=1
+    mpl.show()
 
 
-# jsonTypeMap = {
-#   "lowlevel":
-#   {"average_loudness":"num","barkbands":"d2","dissonance":"d1", "dynamic_complexity":"num", "melbands": "d2","mfcc":"d2","pitch_salience":"d1","spectral_centroid":"d1","spectral_energy":"d1","spectral_energyband_high":"d1","spectral_energyband_low":"d1","spectral_energyband_middle_high":"d1","spectral_energyband_middle_low":"d1","spectral_entropy":"d1","spectral_flux":"d1","spectral_kurtosis":"d1","spectral_rms":"d1","spectral_rolloff":"d1","spectral_skewness":"d1","spectral_spread":"d1","spectral_strongpeak":"d1"},
-#
-#
-#   "rhythm":{"beats_count":"num", "bpm":"num"},
-#
-#   "tonal": {"chords_changes_rate":"num", "chords_histogram":"list", "chords_key":"str", "chords_scale":"str", "key_key":"str", "key_scale":"str", "key_strength":"num"},
-#   # "metadata":{"tags":'d3', "audio_properties":"d1"},
-#   # "metadata":{"tags":'d3'},
-# }
+
+def timeRangeAnova(features,csv="top100-high-level-complete.csv",timeWindowSize=10, plot=False,dateRange=(1950,2010)):
+    data = getTimeSeries(features,csv)
+    # [ timerange( [ features(mean,var) ] ) ]
+    alpha = 0.05
+    data['tags:originaldate'] = data['tags:originaldate'].map(lambda a: math.floor(a.year/timeWindowSize)*timeWindowSize)
+    data = data[data['tags:originaldate']<=dateRange[1]]
+    data = data[dateRange[0] <=data ['tags:originaldate']]
+    print("\n")
+    count = 0
+    for i in features:
+        # mod = sm.OLS(i+" ~ tags:originaldate", data=data)
+        print("| ",i,": ")
+        clean_data = data[pd.notnull(data[i])]
+        unique_years = pd.unique(clean_data['tags:originaldate'])
+        unique_years.sort()
+
+        l = pd.DataFrame()
+        l2 = []
+        for j in unique_years:
+            t= clean_data[clean_data['tags:originaldate']==j]
+            t= t[i]
+            l[j] = t
+            l2.append(t)
+        # print(l2[:5])
+        kruskal = stats.f_oneway(*l2)
+        # post_hoc = ph.posthoc_dunn(clean_data,group_col="tags:originaldate",val_col=i)
+
+        post_hoc = ph.posthoc_tukey_hsd(clean_data[i], clean_data['tags:originaldate'], alpha=alpha)
+
+        significant = set()
+        for y1 in range(post_hoc.shape[0]):
+            for y2 in range(y1):
+                if post_hoc.iloc[y1,y2] == 1:
+                    significant.add((post_hoc.index.values[y1],post_hoc.columns.values[y2]))
+
+        print("| ",kruskal)
+        print("|  significant pairs: ",significant)
+        print("| ",post_hoc)
+        print("| ",(post_hoc<alpha).values.flatten().sum())
+        print("|___________________\n")
+        if plot:
+            # f, axes = mpl.subplots(nrows=1, ncols = 2, constrained_layout=True)
+            # for j in unique_years:
+                # clean_data.boxplot(i,by="tags:originaldate", ax=axes[1])
+            a=clean_data.boxplot(i,by="tags:originaldate")
+            a.set_title(i,fontsize=20)
+
+
+            # axes[1].set_title("")
+            # axes[1].set_xlabel("")
+            # for j in unique_years:
+                # sns.distplot(clean_data[clean_data['tags:originaldate']==j].loc[:,i],label=str(j),bins=40,norm_hist=True,ax=axes[0])
+            # axes[0].legend(loc="upper right")
+            # axes[0].set_xlabel("")
+            # mpl.suptitle(i)
+            mpl.gcf().subplots_adjust(bottom=0.25)
+
+            sigStr = "P<" +str(alpha)+ " (Tukey HSD post-hoc): "
+            c = len(sigStr);
+            for i in str(significant):
+                c +=1
+                sigStr+=i
+                if (c%55==0):
+                    sigStr += "\n"
+            mpl.xlabel(sigStr, fontsize=14)
+        count+=1
+    mpl.show()
+
+
+
+
+
+
+
+def peakPosKruskal(features,csv="top100-high-level-complete.csv",popSize=10, plot=False,dateRange=(1950,2010)):
+    features.append(" peakPos")
+    features= list(set(features))
+    data = getTimeSeries(features,csv)
+    data = data[pd.notnull(data[' peakPos'])]
+    alpha = 0.001
+
+    data[' peakPos'] = data[' peakPos'].map(lambda a: math.floor(a/popSize)*popSize)
+
+    print("\n")
+    count = 0
+    for i in features:
+        # mod = sm.OLS(i+" ~ tags:originaldate", data=data)
+        print("| ",i,": ")
+        clean_data = data[pd.notnull(data[i])]
+        unique_pos = pd.unique(clean_data[' peakPos'])
+        unique_pos.sort()
+
+        l = pd.DataFrame()
+        l2 = []
+        for j in unique_pos:
+            t= clean_data[clean_data[' peakPos']==j]
+            t= t[i]
+            l[j] = t
+            l2.append(t)
+
+        kruskal = stats.kruskal(*l2)
+        post_hoc = ph.posthoc_dunn(clean_data,group_col=" peakPos",val_col=i)
+        dunn_significant = set()
+        for y1 in range(post_hoc.shape[0]):
+            for y2 in range(y1):
+                if post_hoc.iloc[y1,y2] < alpha and y1 != y2:
+                    dunn_significant.add((post_hoc.index.values[y1],post_hoc.columns.values[y2]))
+
+        print("| ",kruskal)
+        print("|  significant pairs: ",dunn_significant)
+        print("| ",post_hoc<alpha)
+        print("|___________________\n")
+        if plot:
+            f, axes = mpl.subplots(nrows=1, ncols = 1, constrained_layout=True)
+            for j in unique_pos:
+                clean_data.boxplot(i,by=" peakPos", ax=axes)
+            # clean_data.boxplot(i,by=" peakPos")
+
+            axes.set_title("")
+            axes.set_xlabel("")
+            # for j in unique_pos:
+                # sns.distplot(clean_data[clean_data[' peakPos']==j].loc[:,i],label=str(j),bins=40,norm_hist=True,ax=axes[0])
+            # axes[0].legend(loc="upper right")
+            # axes[0].set_xlabel("")
+            mpl.suptitle(i)
+            mpl.gcf().subplots_adjust(bottom=0.25)
+
+            dunnStr = "P<" +str(alpha)+ " (Dunn post-hoc): "
+            c = len(dunnStr);
+            for i in str(dunn_significant):
+                c +=1
+                dunnStr+=i
+                if (c%55==0):
+                    dunnStr += "\n"
+            mpl.xlabel(dunnStr, fontsize=14)
+        count+=1
+    mpl.show()
+
+
+def peakPosAnova(features,csv,popSize=10, plot=False,dateRange=(1950,2010)):
+    data = getTimeSeries([' peakPos']+features,csv)
+    print(pd.notnull(data[' peakPos']))
+    data = data[pd.notnull(data[' peakPos'])]
+    print(data[:5])
+
+    # # features.append(" peakPos")
+    # # features= list(set(features))
+    # print(csv)
+    # data = getTimeSeries(features,csv)
+    # features = features+[' peakPos']
+    # data = getTimeSeries(features ,csv)
+    # alpha = 0.001
+    #
+    # print(data[:5])
+    # print("&&&&&&&&")
+    # data[' peakPos'] = data[' peakPos'].map(lambda a: math.floor(a/popSize)*popSize)
+    # print(data[:5])
+    # print("&&&&&&&&")
+    # print("\n")
+    # count = 0
+    # for i in features:
+    #     # mod = sm.OLS(i+" ~ tags:originaldate", data=data)
+    #     print("| ",i,": ")
+    #     clean_data = data[pd.notnull(data[i])]
+    #     print(clean_data[:5])
+    #     unique_pos = pd.unique(clean_data[' peakPos'])
+    #     unique_pos.sort()
+    #     print("fuck")
+    #     print(unique_pos) # &&
+    #     # print(unique_pos)
+    #     l = pd.DataFrame()
+    #     l2 = []
+    #     for j in unique_pos:
+    #         t= clean_data[clean_data[' peakPos']==j]
+    #         t= t[i]
+    #         l[j] = t
+    #         l2.append(t)
+    #     anova = stats.f_oneway(*l2)
+    #     post_hoc = ph.posthoc_tukey_hsd(clean_data[i], clean_data[' peakPos'], alpha=alpha)
+    #     # post_hoc = ph.posthoc_tukey_hsd(clean_data,group_col=" peakPos",val_col=i)
+    #     significant = set()
+    #     for y1 in range(post_hoc.shape[0]):
+    #         for y2 in range(y1):
+    #             if post_hoc.iloc[y1,y2] < alpha and y1 != y2:
+    #                 significant.add((post_hoc.index.values[y1],post_hoc.columns.values[y2]))
+    #
+    #     print("| ",anova)
+    #     print("|  significant pairs: ",significant)
+    #     print("| ",post_hoc<alpha)
+    #     print("|___________________\n")
+    #     if plot:
+    #         f, axes = mpl.subplots(nrows=1, ncols = 1, constrained_layout=True)
+    #         for j in unique_pos:
+    #             clean_data.boxplot(i,by=" peakPos", ax=axes)
+    #         # clean_data.boxplot(i,by=" peakPos")
+    #
+    #         axes.set_title("")
+    #         axes.set_xlabel("")
+    #         # for j in unique_pos:
+    #             # sns.distplot(clean_data[clean_data[' peakPos']==j].loc[:,i],label=str(j),bins=40,norm_hist=True,ax=axes[0])
+    #         # axes[0].legend(loc="upper right")
+    #         # axes[0].set_xlabel("")
+    #         mpl.suptitle(i)
+    #         mpl.gcf().subplots_adjust(bottom=0.25)
+    #
+    #         sigStr = "P<" +str(alpha)+ " (Tukey post-hoc): "
+    #         c = len(sigStr);
+    #         for i in str(significant):
+    #             c +=1
+    #             sigStr+=i
+    #             if (c%55==0):
+    #                 sigStr += "\n"
+    #         mpl.xlabel(sigStr, fontsize=14)
+    #     count+=1
+    # mpl.show()
 
 
 jsonTypeMap = {
@@ -413,15 +642,8 @@ jsonTypeMap = {
   "rhythm":{"beats_count":"num", "bpm":"num"},
 
   "tonal": {"chords_changes_rate":"num", "chords_histogram":"list", "chords_key":"str", "chords_scale":"str", "key_key":"str", "key_scale":"str", "key_strength":"num"},
-  # "metadata":{"tags":'d3', "audio_properties":"d1"},
-  # "metadata":{"tags":'d3'},
 }
 
-# "num" - 0.0
-# "d1"  - {dmean:0...}
-# "d2"  - {dmean[0]...}  {cov[], ...}
-# "list" - [0.0]
-# "str" - "E"
 
 
 
@@ -487,170 +709,59 @@ def appendJSONToLowlevelCSV(csvURL, jsonVal):
             outfile.write(s)
     return None
 
-# def get_flat_json(json_data, header_string, header, row):
-#     """Parse json files with nested key-vales into flat lists using nested column labeling"""
-#     for root_key, root_value in json_data.items():
-#         if isinstance(root_value, dict):
-#             get_flat_json(root_value, header_string + '_' + str(root_key), header, row)
-#         elif isinstance(root_value, list):
-#             for value_index in range(len(root_value)):
-#                 for nested_key, nested_value in root_value[value_index].items():
-#                     header[0].append((header_string +
-#                                       '_' + str(root_key) +
-#                                       '_' + str(nested_key) +
-#                                       '_' + str(value_index)).strip('_'))
-#                     if nested_value is None:
-#                         nested_value = ''
-#                     row[0].append(str(nested_value))
-#         else:
-#             if root_value is None:
-#                 root_value = ''
-#             header[0].append((header_string + '_' + str(root_key)).strip('_'))
-#             row[0].append(root_value)
-#     return header, row
 
 
 
 def pull():
-    print((datetime.datetime.now()-startTime).seconds)
-
+    concurrent = 50
     csv = pd.read_csv('top100-high-level-complete.csv')
     mbids = list(csv['mbid'])
-    i = 0
-    atATime = 5
-    while (i < len(mbids)):
-        # try:
-        for j in range(atATime):
-            r = requests.get('https://acousticbrainz.org/api/v1/low-level',params={"recording_ids":mbids[i+j]})
-            val = json.loads(r.text)
-            print(val.keys())
-            print("\n")
-        # appendJSONToLowlevelCSV(csvURL="top100-low-level-complete.csv",jsonVal=vals)
-        print('count: ',i,"  -  ",i/len(mbids),"% pulled")
-        i+=atATime
-        if(i>5):
-            return
-        # except KeyboardInterrupt:
-            # return
-        # except:
-            # print("Error on iter: ",i)
-    # r = requests.get('https://acousticbrainz.org/api/v1/low-level',params={"recording_ids":mbids[:35]})
-    # print("size: ",len(r.text.encode('utf-8')))
-    # print(r.text)
-    # j = json.loads(r.text)
-    #
-    # print(len([]))
+    def doWork():
+        while True:
+            mbid = q.get()
+            r = requests.get('https://acousticbrainz.org/api/v1/low-level',params={"recording_ids":[mbid]})
+            jsonVal = r.json()
+            # print(jsonVal.keys())
+            appendJSONToLowlevelCSV("top100-low-level-complete.csv", jsonVal)
+            q.task_done()
+    cc = 0
+    q = queue.Queue(concurrent * 2)
+    for i in range(concurrent):
+        t = Thread(target=doWork)
+        t.daemon = True
+        t.start()
+    try:
+        for mbid in mbids:
+            q.put(mbid)
+            cc+=1
+            print("iter: ",cc,"  -  ",cc/15000,"% done")
+            q.join()
+    except KeyboardInterrupt:
+        sys.exit(1)
 
 
-# *********** Data analysis
-# dateLinRegress(features,plot=True)
-# for i in features:
-    # calculateBasicStats("top100-high-level-complete.csv",i,True)
-# timeRangeKruskal(features, timeWindowSize=10,plot=True,dateRange=(1950,2020))
+def yearCoverage(csvURL,timeWindowSize=10):
+    data = getTimeSeries(["metadata:tags:title"],csvURL)
+    data['tags:originaldate'] = data['tags:originaldate'].map(lambda a: math.floor(a.year/timeWindowSize)*timeWindowSize)
+    min =data['tags:originaldate'].min()
+    max = data['tags:originaldate'].max()
+    a = data.hist(bins=max-min)
+    a[0][0].set_title("")
+    mpl.suptitle("Coverage of Billboard Top 100 in AcoustirBrainz High-level Dataset")
 
-# pull()
+    mpl.show()
 
-# r = requests.get('https://acousticbrainz.org/api/v1/low-level',params={"recording_ids":['00057ae3-8bdc-4be3-9820-9006a10d763e', '00062658-acfc-4bdf-806f-aa6ec85e8ddd', '0006bab8-2a26-4f8d-8289-56d66ae01c68', '0008a33b-631f-4c66-a50e-ab33f27a2961']})
+def peakPosCoverage(csvURL,windowSize = 1):
+    data = getTimeSeries([" peakPos"],csvURL)
+    data = data[pd.notnull(data[' peakPos'])]
+    data[' peakPos'] = data[' peakPos'].map(lambda a: math.floor(a/windowSize)*windowSize)
 
+    top10 = data[data[' peakPos']<=10]
+    print("10:  ",top10.shape)
 
-
-
-
-
-
-
-# h = httplib2.Http();
-
-concurrent = 50
-csv = pd.read_csv('top100-high-level-complete.csv')
-mbids = list(csv['mbid'])
-def doWork():
-    while True:
-        mbid = q.get()
-        r = requests.get('https://acousticbrainz.org/api/v1/low-level',params={"recording_ids":[mbid]})
-        jsonVal = r.json()
-        # print(jsonVal.keys())
-        appendJSONToLowlevelCSV("top100-low-level-complete.csv", jsonVal)
-        q.task_done()
-
-
-cc = 0
-q = queue.Queue(concurrent * 2)
-for i in range(concurrent):
-    t = Thread(target=doWork)
-    t.daemon = True
-    t.start()
-try:
-    for mbid in mbids:
-        q.put(mbid)
-        cc+=1
-        print("iter: ",cc,"  -  ",cc/15000,"% done")
-    q.join()
-except KeyboardInterrupt:
-    sys.exit(1)
-
-
-
-# feature = " mood_happy:happy"
-# data = getTimeSeries(feature)
-
-# x = data['tags:originaldate'].map(lambda a: a.year).as_matrix()
-# y = data[feature].as_matrix()
-
-
-
-# slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
-# slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
-
-# print("slope: ",slope, "  p: ",p_value)
-# mpl.scatter(x,y,s=1)
-# mpl.show()
-
-
-
-
-# print(originaldate['tags:originaldate'].map(fk)[:5] ==)
-
-# print(date[:5])
-# print(originaldate.shape)
-# originaldate = originaldate.where(,date)
-
-# print(originaldate[:5])
-
-# pd.where(originaldate['tags:originaldate'].isnat(),date)
-# date = date.as_matrix()
-# print(originaldate[:5,0])
-
-# print(np.isnat(originaldate[:,0]))
-
-# date = np.where(np.isnat(originaldate[:,0]), date, originaldate) # where original date is not defined, take 'date'
-# date = date[np.logical_not(np.isnat(date))]
-
-# print("with dates: ",date.shape)
-# print(date[:5])
-
-
-# csv = pd.read_csv("top100-high-level-complete.csv", sep=",",header=0)
-# print(csv.shape)
-# print(type(csv))
-# csv.replace("",np.nan,inplace=True)
-# csv.dropna(subset=[' peakPos'],inplace=True)
-# data = csv.loc[:," peakPos"]
-# print(data[:100])
-# print(data.shape)
-# print(data.mean())
-# print(data.var())
-# print(csv.shape)
-# print("done")
-# >>> df.dropna(subset=['Tenant'], inplace=True)
-# defined = [i for i in data if not pd.isnull(i[1]) and i[1] >= pd.to_datetime('1900',utc=True).date() and i[2]!= None]
-
-
-
-def getLowelevel (inputCsvPath,outputCsvPath):
-    csv = pd.read_csv(inputCsvPath, sep=",",header=0)
-    mbids = csv.as_matrix[:,0]
-
+    data = data[' peakPos']
+    data.hist(bins=100)
+    mpl.show()
 
 def ugh():
     csv1 = pd.read_csv("top100-high-level-commas-removed.csv", sep=",",header=0).as_matrix()[:,0]
@@ -664,82 +775,144 @@ def ugh():
             print(i)
             print(csv1[i],"  ",csv2[i])
             cond=False
-        i +=1
-    print(csv1==csv2)
+            i +=1
+            print(csv1==csv2)
 
 
-# generateMetadataCsv("top100-high-level-commas-removed.csv",outputCsvPath="top100-high-level-metadata.csv")
-
-# removeEndRowCommas('top100-high-level.csv','top100-high-level-commas-removed.csv')
-
+def ampDb (amp):
+    return 20*Math.log(amp)
 
 
+def dateLinRegress2(features, csv,dateRange=('1900','2020'),plot=False):
+    data = getTimeSeries(features,csv)
+    dateRange = (pd.to_datetime(str(dateRange[0])), pd.to_datetime(str(dateRange[1])))
+    # x = data['tags:originaldate'].map(lambda a: a.year).as_matrix
+    data = data[data['tags:originaldate']<=dateRange[1]]
+    data = data[dateRange[0] <=data ['tags:originaldate']]
+    data['tags:originaldate'] = data['tags:originaldate'].map(lambda a: a.year)
+    data = data.groupby('tags:originaldate',as_index=False).mean();
+    print(data[:5])
+
+
+# lowlevelFeatures = ["lowlevel:spectral_energyband_low:mean","lowlevel:spectral_energy:mean","empty nothing"]
+
+    # data['lowlevel:spectral_energy_low:mean'] = data['lowlevel:spectral_energy_low:mean'].map(ampDb)
+    # data['lowlevel:spectral_energy:mean'] = data['lowlevel:spectral_energy:mean'].map(ampDb)
+
+
+    f = None
+    if plot:
+        f, axes = mpl.subplots(nrows = math.ceil(len(features)/2), ncols = 2,figsize=(10,30))
+    for i in range(len(features)):
+        print(features[i]," :")
+        # t = data[pd.notnull(data[features[i]])]
+        # axes[i//2][i%2] = data[features[i]].scatter()
+        x = data['tags:originaldate'].values
+        y = data[features[i]].values
+        slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
+        if plot:
+            axes[i//2][i%2].scatter(x,y,s=1)
+            axes[i//2][i%2].set_title(features[i])
+            # axes[i//2][i%2].set_ylim(0,1)
+            # axes[i//2][i%2].set_ylabel("squared amplitude (full-scale)")
+
+            axes[i//2][i%2].text(0.05, 0.95, ("m: %0.2E, p: %0.2E" % (Decimal(slope), Decimal(p_value))), transform=axes[i//2][i%2].transAxes, fontsize=12, verticalalignment='top', bbox= dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        print("slope: ",slope, "  p: ",p_value)
+        print('_____________\n')
+    if plot:
+        mpl.show()
+
+
+lowlevelFeatures = ["lowlevel:average_loudness","lowlevel:dissonance:mean","lowlevel:dynamic_complexity","lowlevel:pitch_salience:mean","lowlevel:pitch_salience:median","lowlevel:spectral_centroid:mean","lowlevel:spectral_centroid:median","lowlevel:spectral_centroid:var","lowlevel:spectral_energy:mean","lowlevel:spectral_energy:median","lowlevel:spectral_energy:var","lowlevel:spectral_energyband_high:mean","lowlevel:spectral_energyband_high:median","lowlevel:spectral_energyband_high:var","lowlevel:spectral_energyband_low:mean","lowlevel:spectral_energyband_low:median","lowlevel:spectral_energyband_low:var","lowlevel:spectral_energyband_middle_high:mean","lowlevel:spectral_energyband_middle_high:median","lowlevel:spectral_energyband_middle_high:var","lowlevel:spectral_energyband_middle_low:mean","lowlevel:spectral_energyband_middle_low:median","lowlevel:spectral_energyband_middle_low:var","lowlevel:spectral_entropy:mean","lowlevel:spectral_entropy:median","lowlevel:spectral_entropy:var","lowlevel:spectral_kurtosis:mean","lowlevel:spectral_kurtosis:median","lowlevel:spectral_kurtosis:var","lowlevel:spectral_spread:mean","lowlevel:spectral_spread:median","lowlevel:spectral_spread:var","rhythm:beats_count","rhythm:bpm"]
+
+l = []
+for i in lowlevelFeatures:
+    if not "var" in i and not "median" in i and not 'kurtosis' in i and not 'complexity' in i and not 'salience' in i:
+        l.append(i)
+lowlevelFeatures = l
+
+# lowlevelFeatures = ["lowlevel:average_loudness","lowlevel:dissonance:mean","lowlevel:spectral_centroid:mean","lowlevel:spectral_centroid:var","lowlevel:spectral_energy:mean","lowlevel:spectral_energy:var","lowlevel:spectral_entropy:mean","lowlevel:spectral_entropy:var","lowlevel:spectral_kurtosis:mean","lowlevel:spectral_kurtosis:var","lowlevel:spectral_spread:mean","lowlevel:spectral_spread:var","rhythm:beats_count","rhythm:bpm"]
+
+highlevelFeatures = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_aggressive:aggressive"," mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental"," mood_electronic:electronic"," mood_acoustic:acoustic"]
+
+# highlevelFeatures = ["danceability:danceable", " gender:female", " mood_happy:happy", " mood_sad:sad", " mood_party:party", " mood_aggressive:aggressive"," mood_relaxed:relaxed"," timbre:bright"," tonal_atonal:tonal"," voice_instrumental:instrumental"," mood_electronic:electronic"," mood_acoustic:acoustic"]
 
 
 
 
+#
+# def getTimeSeries(features,csvUrl='top100-high-level-complete.csv', fillMissingOriginalDate=True):
 
 
+# data = getTimeSeries(['metadata:tags:genre', " peakPos"],'top100-high-level-complete.csv')
+
+# print(data[:5])
+
+
+# csv.dropna(subset=['metadata:tags:genre'],inplace=True)
+
+# def lol (a):
+#     # print (type(a))
+#     return cleanGenres(str(a))
+# # data = data[data['metadata:tags:genre']]
+# data = data[pd.notnull(data['metadata:tags:genre'])]
+# data['metadata:tags:genre'] = data['metadata:tags:genre'].map(lol)
+# print(data[:10])
+# print(data.shape)
+#
+# genres = list(data['metadata:tags:genre'])
 #
 #
-# print(len(data))
-# print((datetime.datetime.now()-startTime).seconds)
+# genres = [item for sublist in genres for item in sublist]
 #
+# genres = set(genres)
+# genres = list(genres)
+# print(len(genres))
+# print(genres[:30])
+
+# uniq = pd.unique(data['metadata:tags:genre'])
+# print(uniq.shape)
+# print(uniq[:100])
 
 
 
 
+################################################################################################3
+# *********** Data analysis
+################################################################################################
+##### year coverage
+# yearCoverage('top100-low-level-complete.csv',timeWindowSize=1)
+# peakPosCoverage('top100-high-level-complete.csv',20)
 
-# # print("genre undefined for: ",nones*100/lim, "%")
-# # print("unique genres counted: ",len(uniqueGenres))
-# db = column(data,2)
-# db_clean = [i for i in db if i != None]
+##### HIGH LEVEL
+highlevelCSV = "top100-high-level-complete.csv"
+# dateLinRegress(highlevelFeatures,highlevelCSV,plot=True)
+# dateLinRegress2(highlevelFeatures,highlevelCSV,plot=True)
+# for i in highlevelFeatures:
+    # calculateBasicStats(highlevelCSV,i,True)
+# timeRangeKruskal(highlevelFeatures, highlevelCSV,timeWindowSize=10,plot=True,dateRange=(1950,2020))
+peakPosKruskal(highlevelFeatures, highlevelCSV, popSize=10,plot=True,dateRange=(1950,2020))
+
+
+##### LOW LEVEL
+lowlevelCSV = "top100-low-level-complete.csv"
+# dateLinRegress(lowlevelFeatures[:len(lowlevelFeatures)//3],lowlevelCSV,plot=True)
+# dateLinRegress(lowlevelFeatures[len(lowlevelFeatures)//3:len(lowlevelFeatures)*2//3],lowlevelCSV,plot=True)
+# dateLinRegress(lowlevelFeatures[len(lowlevelFeatures)*2//3:len(lowlevelFeatures)],lowlevelCSV,plot=True)
+
+# lowlevelFeatures = ["lowlevel:spectral_energyband_low:mean","naaa","lowlevel:spectral_energy:mean","empty nothing","t","b"]
+# lowlevelFeatures = ["lowlevel:spectral_energyband_middle_high:mean","lowlevel:spectral_energyband_high:mean", "lowlevel:spectral_energyband_middle_low:mean", "lowlevel:spectral_energyband_low:mean","lowlevel:spectral_energy:mean"]
+# dateLinRegress2(lowlevelFeatures,lowlevelCSV,plot=True)
 #
-# defined = [i for i in data if not pd.isnull(i[1]) and i[1] >= pd.to_datetime('1900',utc=True).date() and i[2]!= None]
-#
-# years = [pd.to_datetime(str(i)) for i in range(1950,2020)]
-#
-# rock = [i for i in defined if i[0] != None and 'rock' in i[0]]
-# dance = [i for i in defined if i[0] != None and 'dance' in i[0]]
-#
-# plotme = defined
-#
-#
-#
-# x = np.array(column(plotme,1))
-# y = np.array(column(plotme,2))
-#
-# # for i in x:
-# #     print(i)
-# print("loaded")
-#
-#
-# # stats.linregress(x,y)
-# year_vectorized = np.vectorize(lambda d : d.year);
-# x = year_vectorized(x)
-#
-# slope, intercept, r_value, p_value, std_err = stats.linregress(x,y)
-# print("slope: ",slope, "  p: ",p_value)
-#
-# print((datetime.datetime.now()-startTime).seconds)
-#
-# # mpl.scatter(x,y,s=1)
-# # mpl.plot([pd.to_datetime('2000',utc=True),pd.to_datetime('2001',utc=True)],[1,2])
-# # mpl.show()
-#
-#
-#
-# # df = pd.DataFrame(np.random.random((200,3)))
-# # df['date'] = pd.date_range('2000-1-1', periods=200, freq='D')
-# # mask = (df['date'] > '2000-6-1') & (df['date'] <= '2000-6-10')
-# # print(df.loc[mask])
-#
-#
-#
-# # data  = pd.read_csv('fma_metadata/raw_tracks.csv', delimiter = ',', dtype = None)
-# #
-# # # data = np.genfromtxt("fma_metadata/raw_tracks.csv", delimiter=",",encoding="utf8",usecols=(1),names=True, dtype=None, max_rows=100000)
-# #
-# # dates = data[19,:]
-# #
-# # print(dates.shape);
+# dateLinRegress2(lowlevelFeatures,lowlevelCSV,plot=True)
+
+# dateLinRegress2(lowlevelFeatures[:len(lowlevelFeatures)//3],lowlevelCSV,plot=True)
+# dateLinRegress2(lowlevelFeatures[len(lowlevelFeatures)//3:len(lowlevelFeatures)*2//3],lowlevelCSV,plot=True)
+# dateLinRegress2(lowlevelFeatures[len(lowlevelFeatures)*2//3:len(lowlevelFeatures)],lowlevelCSV,plot=True)
+
+# for i in lowlevelFeatures:
+    # calculateBasicStats(lowlevelCSV,i,True)
+# timeRangeAnova(lowlevelFeatures,lowlevelCSV, timeWindowSize=10,plot=True,dateRange=(1950,2020))
+# timeRangeKruskal(lowlevelFeatures[10:],lowlevelCSV, timeWindowSize=10,plot=True,dateRange=(1950,2020))
+# peakPosAnova(lowlevelFeatures, lowlevelCSV, popSize=10,plot=True,dateRange=(1950,2020))
+# peakPosKruskal(lowlevelFeatures, lowlevelCSV, popSize=10,plot=True,dateRange=(1950,2020))
